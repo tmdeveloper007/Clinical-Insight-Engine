@@ -439,7 +439,7 @@ export async function registerRoutes(
   // Mount domain-specific routers to allow static routes (like /cohort) to match before dynamic /:id fallback
   app.use("/api/assessments", mlRouter);
   app.use("/api/assessments", exportsRouter);
-  app.use("/api/assessments", analyticsRouter);
+  app.use("/api/analytics", analyticsRouter);
   app.use("/api/assessments", generalLimiter, assessmentsRouter);
 
   /**

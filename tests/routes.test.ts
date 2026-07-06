@@ -4,6 +4,8 @@ import express from "express";
 import session from "express-session";
 import { createServer } from "http";
 import patientsRouter from "../server/routes/patients";
+import analyticsRouter from "../server/routes/analytics.routes";
+import settingsRouter from "../server/routes/settings.routes";
 import { issueToken } from "../server/services/auth/tokenValidator";
 
 const { mockExecFile, rateLimitCounters, mockCreateAssessment, mockGetAssessments } = vi.hoisted(() => ({
@@ -90,6 +92,7 @@ vi.mock("../server/storage", () => {
     getUserById: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@example.com", isActive: true, role: "provider" }),
     createUser: vi.fn().mockResolvedValue({ id: "admin-id" }),
     recordPatientAccess: vi.fn().mockResolvedValue(undefined),
+    getAnalyticsStats: vi.fn().mockResolvedValue({ totalAssessments: 0 }),
   };
   return {
     storage: mockStorageInstance,
@@ -968,5 +971,113 @@ describe("What-if batch analysis endpoint", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.message).toContain("Maximum of 50 perturbations allowed");
+  });
+});
+
+describe("GET /api/analytics", () => {
+  it("returns 401 when request has no session", async () => {
+    const app = createUnauthenticatedApp();
+    await registerRoutes(createServer(), app);
+    const res = await request(app).get("/api/analytics");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 when session user email is missing", async () => {
+    const app = createAuthenticatedApp();
+    app.use((req: any, _res: any, next: any) => {
+      req.session.user = { id: "test-id", emailVerified: true };
+      next();
+    });
+    await registerRoutes(createServer(), app);
+    const res = await request(app).get("/api/analytics");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 200 with stats when session user email is present", async () => {
+    const module = await import("../server/storage");
+    const stats = { totalAssessments: 10, highRiskCount: 3, lastUpdated: "2026-07-06T00:00:00Z" };
+    (module.storage.getAnalyticsStats as any).mockResolvedValue(stats);
+    const app = createAuthenticatedApp();
+    await registerRoutes(createServer(), app);
+    const res = await request(app).get("/api/analytics");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(stats);
+  });
+
+  it("passes the user email from session to getAnalyticsStats", async () => {
+    const module = await import("../server/storage");
+    (module.storage.getAnalyticsStats as any).mockResolvedValue({ totalAssessments: 0 });
+    const app = createAuthenticatedApp();
+    app.use((req: any, _res: any, next: any) => {
+      req.session.user = { id: "test-id", email: "analyst@hospital.org", name: "Test", emailVerified: true };
+      next();
+    });
+    await registerRoutes(createServer(), app);
+    await request(app).get("/api/analytics");
+    expect((module.storage.getAnalyticsStats as any)).toHaveBeenCalledWith("analyst@hospital.org");
+  });
+
+  it("returns 500 when storage throws an error", async () => {
+    const module = await import("../server/storage");
+    (module.storage.getAnalyticsStats as any).mockRejectedValue(new Error("Database error"));
+    const app = createAuthenticatedApp();
+    await registerRoutes(createServer(), app);
+    const res = await request(app).get("/api/analytics");
+    expect(res.status).toBe(500);
+  });
+});
+
+describe("GET /api/settings", () => {
+  it("returns 401 when not authenticated", async () => {
+    const app = createUnauthenticatedApp();
+    await registerRoutes(createServer(), app);
+    const res = await request(app).get("/api/settings");
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("Rate limit middleware", () => {
+  it("generalLimiter calls next for requests under limit", async () => {
+    const { generalLimiter } = await import("../server/middleware/rateLimit");
+    const req = { ip: "127.0.0.1" } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as any;
+    const next = vi.fn();
+    generalLimiter(req, res, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("mlLimiter calls next for requests under limit", async () => {
+    const { mlLimiter } = await import("../server/middleware/rateLimit");
+    const req = { ip: "127.0.0.1" } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as any;
+    const next = vi.fn();
+    mlLimiter(req, res, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("exportLimiter returns 429 when limit exceeded", async () => {
+    const { exportLimiter } = await import("../server/middleware/rateLimit");
+    const req = { ip: "ratelimit-test-ip" } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as any;
+    const next = vi.fn();
+    for (let i = 0; i < 10; i++) {
+      exportLimiter(req, res, next);
+    }
+    exportLimiter(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(res.json).toHaveBeenCalled();
+  });
+
+  it("assessmentLimiter returns 429 when limit exceeded", async () => {
+    const { assessmentLimiter } = await import("../server/middleware/rateLimit");
+    const req = { ip: "assessment-limit-ip" } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as any;
+    const next = vi.fn();
+    for (let i = 0; i < 5; i++) {
+      assessmentLimiter(req, res, next);
+    }
+    assessmentLimiter(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(res.json).toHaveBeenCalled();
   });
 });

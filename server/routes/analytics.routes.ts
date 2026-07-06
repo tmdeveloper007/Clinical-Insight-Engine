@@ -6,7 +6,7 @@ import { storage } from "../storage";
 const analyticsRouter = Router();
 
 analyticsRouter.get(
-  "/analytics",
+  "/",
   requireAuth,
   requireVerified,
   async (req, res) => {
