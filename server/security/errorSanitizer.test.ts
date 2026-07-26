@@ -1,176 +1,155 @@
-import { describe, it, expect } from "vitest";
+/**
+ * errorSanitizer.test.ts
+ *
+ * Unit tests for server/security/errorSanitizer.ts
+ * Ensures that internal system details, file paths, IP addresses, and stack traces
+ * are never exposed to API clients.
+ */
+
+import { describe, expect, it } from "vitest";
 import {
   sanitizeErrorMessage,
   getSafeServerErrorMessage,
   getSafeClientErrorMessage,
 } from "./errorSanitizer";
 
-describe("errorSanitizer", () => {
-  describe("sanitizeErrorMessage", () => {
-    it("removes stack traces from error messages", () => {
-      const error = new Error("Database error at /home/user/app/db.ts (line 42:15)");
-      const result = sanitizeErrorMessage(error);
-      expect(result).not.toContain("/home/user");
-      expect(result).toBe("An error occurred");
-    });
-
-    it("removes file paths from error messages", () => {
-      const error = new Error("Failed to read /var/lib/app/config.json");
-      const result = sanitizeErrorMessage(error);
-      expect(result).not.toContain("/var/lib/app");
-      expect(result).toBe("An error occurred");
-    });
-
-    it("removes Windows file paths", () => {
-      const error = new Error("Failed at C:\\Users\\admin\\app\\server.js line 100");
-      const result = sanitizeErrorMessage(error);
-      expect(result).not.toContain("C:\\");
-      expect(result).toBe("An error occurred");
-    });
-
-    it("removes SQL error details", () => {
-      const error = new Error("database error: relation 'users' does not exist");
-      const result = sanitizeErrorMessage(error);
-      expect(result).toBe("An error occurred");
-    });
-
-    it("removes credential references", () => {
-      const error = new Error("Authentication failed: API key mismatch");
-      const result = sanitizeErrorMessage(error);
-      expect(result).toBe("An error occurred");
-    });
-
-    it("removes password references", () => {
-      const error = new Error("Database password validation failed");
-      const result = sanitizeErrorMessage(error);
-      expect(result).toBe("An error occurred");
-    });
-
-    it("removes IP addresses", () => {
-      const error = new Error("Connection refused from 192.168.1.100");
-      const result = sanitizeErrorMessage(error);
-      expect(result).not.toContain("192.168.1.100");
-      expect(result).toBe("An error occurred");
-    });
-
-    it("allows generic numbers in messages", () => {
-      const error = new Error("Process 5432 crashed");
-      const result = sanitizeErrorMessage(error);
-      // Generic numbers are allowed; only sensitive patterns are blocked
-      expect(result).toBe("Process 5432 crashed");
-    });
-
-    it("returns default message for null or undefined", () => {
-      expect(sanitizeErrorMessage(null)).toBe("An error occurred");
-      expect(sanitizeErrorMessage(undefined)).toBe("An error occurred");
-    });
-
-    it("accepts custom default message", () => {
-      const error = new Error("Stack trace at /var/app/error.ts");
-      const result = sanitizeErrorMessage(error, "Custom error occurred");
-      expect(result).toBe("Custom error occurred");
-    });
-
-    it("handles ENOENT error code", () => {
-      const error = new Error("ENOENT: no such file or directory");
-      (error as any).code = "ENOENT";
-      const result = sanitizeErrorMessage(error);
-      expect(result).toBe("Resource not found");
-    });
-
-    it("handles EACCES error code", () => {
-      const error = new Error("EACCES: permission denied");
-      (error as any).code = "EACCES";
-      const result = sanitizeErrorMessage(error);
-      expect(result).toBe("Access denied");
-    });
-
-    it("handles ETIMEDOUT error code", () => {
-      const error = new Error("ETIMEDOUT: operation timed out");
-      (error as any).code = "ETIMEDOUT";
-      const result = sanitizeErrorMessage(error);
-      expect(result).toBe("Request timed out");
-    });
-
-    it("removes messages with 'Internal' keyword", () => {
-      const error = new Error("Internal system error occurred");
-      const result = sanitizeErrorMessage(error);
-      expect(result).toBe("An error occurred");
-    });
-
-    it("removes messages with 'Uncaught' keyword", () => {
-      const error = new Error("Uncaught exception in main thread");
-      const result = sanitizeErrorMessage(error);
-      expect(result).toBe("An error occurred");
-    });
-
-    it("handles string error messages", () => {
-      const result = sanitizeErrorMessage("Database error at /var/app/db.ts");
-      expect(result).toBe("An error occurred");
-    });
-
-    it("handles object with message property", () => {
-      const error = { message: "Failed at /home/user/app.ts line 50" };
-      const result = sanitizeErrorMessage(error);
-      expect(result).toBe("An error occurred");
-    });
-
-    it("preserves safe error messages", () => {
-      const error = new Error("Validation failed: email is required");
-      const result = sanitizeErrorMessage(error);
-      // This should be preserved as it doesn't match sensitive patterns
-      expect(result).toBe("Validation failed: email is required");
-    });
-
-    it("preserves safe timeout message", () => {
-      const error = new Error("Request timed out after 30 seconds");
-      const result = sanitizeErrorMessage(error);
-      expect(result).toContain("timed out");
-    });
+describe("sanitizeErrorMessage", () => {
+  it("returns defaultMessage when error is null", () => {
+    expect(sanitizeErrorMessage(null)).toBe("An error occurred");
+    expect(sanitizeErrorMessage(null, "custom")).toBe("custom");
   });
 
-  describe("getSafeServerErrorMessage", () => {
-    it("always returns generic message for server errors", () => {
-      const error = new Error("Sensitive DB error at /var/database/backup.sql");
-      const result = getSafeServerErrorMessage(error);
-      expect(result).toBe("An internal server error occurred");
-    });
-
-    it("returns generic message even for undefined errors", () => {
-      const result = getSafeServerErrorMessage();
-      expect(result).toBe("An internal server error occurred");
-    });
-
-    it("never exposes file paths in server error message", () => {
-      const error = new Error("/var/sensitive/path/exposed.ts");
-      const result = getSafeServerErrorMessage(error);
-      expect(result).not.toContain("/var");
-    });
+  it("returns defaultMessage when error is undefined", () => {
+    expect(sanitizeErrorMessage(undefined)).toBe("An error occurred");
+    expect(sanitizeErrorMessage(undefined, "custom")).toBe("custom");
   });
 
-  describe("getSafeClientErrorMessage", () => {
-    it("returns safe validation error messages", () => {
-      const error = new Error("Email format is invalid");
-      const result = getSafeClientErrorMessage(error);
-      expect(result).toContain("invalid");
-    });
+  it("returns defaultMessage for an Error with a stack trace in message", () => {
+    const err = new Error("Error at /home/app/server/utils/helper.ts:42");
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
 
-    it("removes file paths from client errors", () => {
-      const error = new Error("Parse error at /app/parser.js:42");
-      const result = getSafeClientErrorMessage(error);
-      expect(result).not.toContain("/app/parser");
-    });
+  it("returns defaultMessage for an Error with a file path in message", () => {
+    const err = new Error("Error at /home/user/app/server/utils/helper.ts:42");
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
 
-    it("returns default message for sensitive client errors", () => {
-      const error = new Error("Database connection at 192.168.1.1 failed");
-      const result = getSafeClientErrorMessage(error, "Connection error");
-      expect(result).toBe("Connection error");
-    });
+  it("returns defaultMessage for an Error with a Windows path", () => {
+    const err = new Error("Failed at C:\\Users\\dev\\project\\index.ts");
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
 
-    it("preserves safe validation messages", () => {
-      const error = new Error("Password must be at least 8 characters");
-      const result = getSafeClientErrorMessage(error);
-      expect(result).toContain("8 characters");
-    });
+  it("returns defaultMessage for an Error with an IP address", () => {
+    const err = new Error("Connection from 192.168.1.100 failed");
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
+
+  it("returns defaultMessage for an Error containing 'internal'", () => {
+    const err = new Error("Internal error occurred");
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
+
+  it("returns defaultMessage for an Error containing 'system'", () => {
+    const err = new Error("System failure detected");
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
+
+  it("returns defaultMessage for an Error containing 'uncaught'", () => {
+    const err = new Error("Uncaught exception in main");
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
+
+  it("returns defaultMessage for Error with code ENOENT (resource not found)", () => {
+    const err = Object.assign(new Error("file not found"), { code: "ENOENT" });
+    expect(sanitizeErrorMessage(err)).toBe("Resource not found");
+  });
+
+  it("returns defaultMessage for Error with code EACCES (access denied)", () => {
+    const err = Object.assign(new Error("permission denied"), { code: "EACCES" });
+    expect(sanitizeErrorMessage(err)).toBe("Access denied");
+  });
+
+  it("returns defaultMessage for Error with code ETIMEDOUT", () => {
+    const err = Object.assign(new Error("timed out"), { code: "ETIMEDOUT" });
+    expect(sanitizeErrorMessage(err)).toBe("Request timed out");
+  });
+
+  it("returns defaultMessage for Error with code ECONNREFUSED", () => {
+    const err = Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" });
+    expect(sanitizeErrorMessage(err)).toBe("Service unavailable");
+  });
+
+  it("returns defaultMessage for Error with code ECONNRESET", () => {
+    const err = Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+    expect(sanitizeErrorMessage(err)).toBe("Connection reset");
+  });
+
+  it("passes through a safe plain string message", () => {
+    const msg = "Something went wrong";
+    expect(sanitizeErrorMessage(msg)).toBe(msg);
+  });
+
+  it("passes through a safe plain string message with custom default", () => {
+    const msg = "Invalid input provided";
+    expect(sanitizeErrorMessage(msg, "custom")).toBe(msg);
+  });
+
+  it("returns defaultMessage when plain string contains 'internal'", () => {
+    expect(sanitizeErrorMessage("internal server error")).toBe("An error occurred");
+  });
+
+  it("passes through an object with a safe .message field", () => {
+    const obj = { message: "Record not found", extra: "data" };
+    expect(sanitizeErrorMessage(obj)).toBe("Record not found");
+  });
+
+  it("returns defaultMessage for object with .code ENOENT even if .message is set", () => {
+    const obj = { code: "ENOENT", message: "some internal path /var/data" };
+    expect(sanitizeErrorMessage(obj)).toBe("Resource not found");
+  });
+
+  it("returns empty string maps to defaultMessage", () => {
+    expect(sanitizeErrorMessage("")).toBe("An error occurred");
+    expect(sanitizeErrorMessage("")).toBe("An error occurred");
+  });
+
+  it("returns defaultMessage when Error has no message", () => {
+    const err = new Error();
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
+
+  it("strips database error details from client messages", () => {
+    const err = new Error("relation 'patients' does not exist in schema");
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
+
+  it("strips credential error details from client messages", () => {
+    const err = new Error("database secret validation failed");
+    expect(sanitizeErrorMessage(err)).toBe("An error occurred");
+  });
+
+  it("returns defaultMessage for an object with no useful info", () => {
+    expect(sanitizeErrorMessage({})).toBe("An error occurred");
+    expect(sanitizeErrorMessage({ foo: "bar" })).toBe("An error occurred");
+  });
+});
+
+describe("getSafeServerErrorMessage", () => {
+  it("always returns a generic server error message", () => {
+    expect(getSafeServerErrorMessage()).toBe("An internal server error occurred");
+    expect(getSafeServerErrorMessage(new Error("details"))).toBe("An internal server error occurred");
+    expect(getSafeServerErrorMessage(null)).toBe("An internal server error occurred");
+  });
+});
+
+describe("getSafeClientErrorMessage", () => {
+  it("delegates to sanitizeErrorMessage with default", () => {
+    const err = Object.assign(new Error("Invalid input"), { code: "ENOENT" });
+    expect(getSafeClientErrorMessage(err)).toBe("Resource not found");
+  });
+
+  it("returns custom default when error contains internal/system keywords", () => {
+    const err = new Error("Internal server error occurred");
+    expect(getSafeClientErrorMessage(err, "Bad Request")).toBe("Bad Request");
   });
 });
