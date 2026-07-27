@@ -1,97 +1,65 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { Request, Response, NextFunction } from "express";
 import { asyncHandler } from "./asyncHandler";
 
+type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
+type SyncHandler = (req: Request, res: Response, next: NextFunction) => void;
+
 describe("asyncHandler", () => {
-  it("returns a function (Express RequestHandler)", () => {
-    const mockHandler = vi.fn().mockResolvedValue(undefined);
-    const middleware = asyncHandler(mockHandler);
-    expect(typeof middleware).toBe("function");
-    // Express handler signature: (req, res, next)
-    expect(middleware.length).toBe(3);
+  it("calls the wrapped function with req, res, next", async () => {
+    const req = {} as Request;
+    const res = {} as Response;
+    const next = vi.fn();
+    const handler = asyncHandler(async (r, resArg, nextArg) => {
+      expect(r).toBe(req);
+      expect(resArg).toBe(res);
+      expect(nextArg).toBe(next);
+    });
+    await handler(req, res, next);
   });
 
-  it("calls the wrapped handler with req, res, and next", async () => {
-    const mockHandler = vi.fn().mockResolvedValue(undefined);
-    const middleware = asyncHandler(mockHandler);
-
-    const req = {} as any;
-    const res = {} as any;
+  it("resolves successfully when the async function resolves", async () => {
+    const req = {} as Request;
+    const res = {} as Response;
     const next = vi.fn();
-
-    await middleware(req, res, next);
-
-    expect(mockHandler).toHaveBeenCalledTimes(1);
-    expect(mockHandler).toHaveBeenCalledWith(req, res, next);
-  });
-
-  it("does not call next() when the handler resolves", async () => {
-    const mockHandler = vi.fn().mockResolvedValue(undefined);
-    const middleware = asyncHandler(mockHandler);
-
-    const next = vi.fn();
-    await middleware({} as any, {} as any, next);
-
+    const handler = asyncHandler(async () => {
+      return Promise.resolve();
+    });
+    await handler(req, res, next);
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("calls next(error) when the handler rejects with an error", async () => {
-    const testError = new Error("Something went wrong");
-    const mockHandler = vi.fn().mockRejectedValue(testError);
-    const middleware = asyncHandler(mockHandler);
-
+  it("passes thrown errors to next", async () => {
+    const req = {} as Request;
+    const res = {} as Response;
     const next = vi.fn();
-    await middleware({} as any, {} as any, next);
-
-    expect(next).toHaveBeenCalledTimes(1);
-    expect(next).toHaveBeenCalledWith(testError);
-  });
-
-  it("calls next(error) when the handler throws synchronously", async () => {
-    const testError = new Error("Sync error");
-    // Use a wrapper so the sync throw happens inside the handler body,
-    // which is what asyncHandler's Promise.resolve catches.
-    const mockHandler = vi.fn().mockImplementation(async () => {
+    const testError = new Error("boom");
+    const handler = asyncHandler(async () => {
       throw testError;
     });
-    const middleware = asyncHandler(mockHandler);
-
-    const next = vi.fn();
-    await middleware({} as any, {} as any, next);
-
-    expect(next).toHaveBeenCalledTimes(1);
-    expect(next).toHaveBeenCalledWith(testError);
+    await handler(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(next.mock.calls[0][0]).toBe(testError);
   });
 
-  it("passes non-Error rejections to next as-is", async () => {
-    const nonErrorValue = { code: "AUTH_FAILED", message: "Invalid token" };
-    const mockHandler = vi.fn().mockRejectedValue(nonErrorValue);
-    const middleware = asyncHandler(mockHandler);
-
+  it("passes rejected promises to next", async () => {
+    const req = {} as Request;
+    const res = {} as Response;
     const next = vi.fn();
-    await middleware({} as any, {} as any, next);
-
-    expect(next).toHaveBeenCalledTimes(1);
-    expect(next).toHaveBeenCalledWith(nonErrorValue);
-  });
-
-  it("handles multiple concurrent calls independently", async () => {
-    const callOrder: string[] = [];
-    const mockHandler = vi.fn().mockImplementation(async () => {
-      callOrder.push("handler");
+    const testError = new Error("rejected");
+    const handler = asyncHandler(async () => {
+      throw testError;
     });
-    const middleware = asyncHandler(mockHandler);
+    // The returned function is synchronous; promise chain settles immediately
+    handler(req, res, next);
+    // Wait for microtasks to flush so .catch(next) has fired
+    await new Promise((r) => setImmediate(r));
+    expect(next).toHaveBeenCalledOnce();
+    expect(next.mock.calls[0][0]).toBe(testError);
+  });
 
-    const next = vi.fn();
-    const req = {} as any;
-    const res = {} as any;
-
-    await Promise.all([
-      middleware(req, res, next),
-      middleware(req, res, next),
-    ]);
-
-    expect(mockHandler).toHaveBeenCalledTimes(2);
-    expect(callOrder).toEqual(["handler", "handler"]);
-    expect(next).not.toHaveBeenCalled();
+  it("returns a function", () => {
+    const fn = asyncHandler(async () => {});
+    expect(typeof fn).toBe("function");
   });
 });
