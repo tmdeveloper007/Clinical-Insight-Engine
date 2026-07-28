@@ -537,3 +537,235 @@ describe("detectSqlInjectionPattern positive detection", () => {
     expect(detectSqlInjectionPattern("Smith-OBrien")).toBeNull();
   });
 });
+
+// ─── assessmentsQuerySchema Tests ───────────────────────────────────────────
+
+import { assessmentsQuerySchema, cohortQuerySchema } from "../server/validation/searchValidation";
+
+describe("assessmentsQuerySchema", () => {
+  it("accepts a valid minimal query", () => {
+    const result = assessmentsQuerySchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.page).toBe(1);
+      expect(result.data.limit).toBe(50);
+      expect(result.data.sortBy).toBe("createdAt");
+      expect(result.data.order).toBe("desc");
+    }
+  });
+
+  it("accepts a valid full query with all fields", () => {
+    const result = assessmentsQuerySchema.safeParse({
+      page: 2,
+      limit: 25,
+      sortBy: "riskScore",
+      order: "asc",
+      searchTerm: "diabetes",
+      riskCategory: "HIGH",
+      gender: "Male",
+      minAge: 30,
+      maxAge: 65,
+      startDate: "2024-01-01",
+      endDate: "2024-12-31",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.page).toBe(2);
+      expect(result.data.limit).toBe(25);
+      expect(result.data.riskCategory).toBe("HIGH");
+      expect(result.data.gender).toBe("Male");
+      expect(result.data.minAge).toBe(30);
+      expect(result.data.startDate).toBe("2024-01-01");
+    }
+  });
+
+  it("normalizes gender strings to title case", () => {
+    const male = assessmentsQuerySchema.safeParse({ gender: "male" });
+    const female = assessmentsQuerySchema.safeParse({ gender: "female" });
+    const other = assessmentsQuerySchema.safeParse({ gender: "other" });
+    const all = assessmentsQuerySchema.safeParse({ gender: "all" });
+    expect(male.success && male.data.gender).toBe("Male");
+    expect(female.success && female.data.gender).toBe("Female");
+    expect(other.success && other.data.gender).toBe("Other");
+    expect(all.success && all.data.gender).toBe("All");
+  });
+
+  it("normalizes riskCategory to uppercase", () => {
+    const result = assessmentsQuerySchema.safeParse({ riskCategory: "low" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.riskCategory).toBe("LOW");
+    }
+  });
+
+  it("accepts ISO 8601 startDate and endDate", () => {
+    const result = assessmentsQuerySchema.safeParse({
+      startDate: "2024-06-15",
+      endDate: "2024-12-31",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects ambiguous date format in startDate", () => {
+    const result = assessmentsQuerySchema.safeParse({ startDate: "06/15/2024" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid risk category", () => {
+    const result = assessmentsQuerySchema.safeParse({ riskCategory: "CRITICAL" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid gender value", () => {
+    const result = assessmentsQuerySchema.safeParse({ gender: "Non-binary" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects minAge below 0", () => {
+    const result = assessmentsQuerySchema.safeParse({ minAge: -5 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects maxAge above 120", () => {
+    const result = assessmentsQuerySchema.safeParse({ maxAge: 150 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects limit above 100", () => {
+    const result = assessmentsQuerySchema.safeParse({ limit: 150 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects page below 1", () => {
+    const result = assessmentsQuerySchema.safeParse({ page: 0 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects SQL injection in searchTerm", () => {
+    const result = assessmentsQuerySchema.safeParse({ searchTerm: "' OR '1'='1" });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts valid sortBy values", () => {
+    const sortFields = ["createdAt", "date", "riskScore", "risk", "age", "bmi", "patientName", "gender"];
+    for (const field of sortFields) {
+      const result = assessmentsQuerySchema.safeParse({ sortBy: field });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("rejects invalid sortBy value", () => {
+    const result = assessmentsQuerySchema.safeParse({ sortBy: "invalidField" });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ─── cohortQuerySchema Tests ────────────────────────────────────────────────
+
+describe("cohortQuerySchema", () => {
+  it("accepts a valid empty query", () => {
+    const result = cohortQuerySchema.safeParse({});
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts numeric range filters for clinical measurements", () => {
+    const result = cohortQuerySchema.safeParse({
+      minAge: 30,
+      maxAge: 65,
+      minBmi: 18.5,
+      maxBmi: 29.9,
+      minHba1c: 4.0,
+      maxHba1c: 6.4,
+      minGlucose: 70,
+      maxGlucose: 140,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.minAge).toBe(30);
+      expect(result.data.maxGlucose).toBe(140);
+    }
+  });
+
+  it("accepts valid gender normalization", () => {
+    const male = cohortQuerySchema.safeParse({ gender: "male" });
+    const female = cohortQuerySchema.safeParse({ gender: "female" });
+    expect(male.success && male.data.gender).toBe("Male");
+    expect(female.success && female.data.gender).toBe("Female");
+  });
+
+  it("accepts valid smokingHistory enum", () => {
+    const result = cohortQuerySchema.safeParse({ smokingHistory: "Never" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts valid hypertension and heartDisease booleans", () => {
+    const result = cohortQuerySchema.safeParse({ hypertension: true, heartDisease: false });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts valid riskCategory (uppercase normalized)", () => {
+    const result = cohortQuerySchema.safeParse({ riskCategory: "high" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.riskCategory).toBe("HIGH");
+    }
+  });
+
+  it("accepts ISO 8601 startDate and endDate", () => {
+    const result = cohortQuerySchema.safeParse({
+      startDate: "2023-01-01",
+      endDate: "2024-12-31",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects invalid riskCategory value", () => {
+    const result = cohortQuerySchema.safeParse({ riskCategory: "EXTREME" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects minAge below 0", () => {
+    const result = cohortQuerySchema.safeParse({ minAge: -1 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects maxAge above 120", () => {
+    const result = cohortQuerySchema.safeParse({ maxAge: 200 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects minBmi below clinical range (10)", () => {
+    const result = cohortQuerySchema.safeParse({ minBmi: 5 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects maxBmi above clinical range (80)", () => {
+    const result = cohortQuerySchema.safeParse({ maxBmi: 100 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects minHba1c below 3", () => {
+    const result = cohortQuerySchema.safeParse({ minHba1c: 2 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects maxHba1c above 20", () => {
+    const result = cohortQuerySchema.safeParse({ maxHba1c: 25 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects minGlucose below 30", () => {
+    const result = cohortQuerySchema.safeParse({ minGlucose: 10 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects maxGlucose above 600", () => {
+    const result = cohortQuerySchema.safeParse({ maxGlucose: 1000 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects ambiguous date format in startDate", () => {
+    const result = cohortQuerySchema.safeParse({ startDate: "01/15/2024" });
+    expect(result.success).toBe(false);
+  });
+});
