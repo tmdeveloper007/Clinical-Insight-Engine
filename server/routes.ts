@@ -11,6 +11,7 @@ import type { Server } from "http";
 
 import assessmentsRouter from "./routes/assessments.routes";
 import fhirRouter from "./routes/fhir.routes";
+import clinicalRouter from "./routes/clinical.routes";
 import { storage, type AssessmentCreateInput } from "./storage";
 import { requireAuth, requireAdmin, requireVerified } from "./auth";
 import { logger } from "./logger";
@@ -22,7 +23,7 @@ import {
 } from "./middleware/rateLimit";
 import { setCsrfToken, requireCsrfToken } from "./middleware/csrf";
 import { rateLimit } from "express-rate-limit";
-import { MLService, pythonDaemon, calculateClinicalFallback, generateRequestFingerprint, type PredictionResult } from "./services/mlService";
+import { MLService, pythonDaemon, mlConcurrency, calculateClinicalFallback, generateRequestFingerprint, type PredictionResult } from "./services/mlService";
 import { getAssessmentQueue, getPythonExecutable, getQueueMetrics } from "./queue";
 import { execFile } from "child_process";
 import path from "path";
@@ -204,6 +205,7 @@ export async function registerRoutes(
   app.use("/api/auth", authRouter);
   app.use("/api/ingest", fhirRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/v1/clinical", clinicalRouter);
 
   // Initialize the report scheduler
   reportScheduler.init();
@@ -630,6 +632,10 @@ export async function registerRoutes(
       logger.error({ err }, "Admin latest model version fetch error:");
       res.status(500).json({ message: "Failed to fetch latest model version." });
     }
+  });
+
+  app.get("/api/admin/semaphore", requireAuth, requireAdmin, async (_req, res) => {
+    res.json(mlConcurrency.getMetrics());
   });
 
   app.get("/api/admin/model/dataset-stats", requireAuth, requireAdmin, async (req, res) => {
