@@ -192,6 +192,79 @@ describe("extractDatesFromText", () => {
     const extracted = extractDatesFromText(note);
     expect(extracted[0].offset).toBe(9); // "Admitted " is 9 chars
   });
+
+  it("extracts dates adjacent to punctuation (colon)", () => {
+    const note = "DOB:2024-01-15.";
+    const extracted = extractDatesFromText(note);
+    expect(extracted).toHaveLength(1);
+    expect(extracted[0].rawMatch).toBe("2024-01-15");
+  });
+
+  it("extracts dates at the string boundary (start)", () => {
+    const note = "2023-12-25 is the admission date.";
+    const extracted = extractDatesFromText(note);
+    expect(extracted).toHaveLength(1);
+    expect(extracted[0].isoString).toBe("2023-12-25");
+  });
+
+  it("extracts dates at the string boundary (end)", () => {
+    const note = "Discharged on 2024-06-30";
+    const extracted = extractDatesFromText(note);
+    expect(extracted).toHaveLength(1);
+    expect(extracted[0].isoString).toBe("2024-06-30");
+  });
+
+  it("extracts multiple dates of mixed formats in the same text", () => {
+    const note = "Admitted 2023-05-10. Follow-up 15 May 2024. Re-checked 08/15/2024.";
+    const extracted = extractDatesFromText(note);
+    expect(extracted).toHaveLength(3);
+    expect(extracted[0].rawMatch).toBe("2023-05-10");
+    expect(extracted[1].rawMatch).toBe("15 May 2024");
+    expect(extracted[2].rawMatch).toBe("08/15/2024");
+  });
+
+  it("extracts dates in parentheses", () => {
+    const note = "Patient (DOB: 2022-08-10) admitted.";
+    const extracted = extractDatesFromText(note);
+    expect(extracted).toHaveLength(1);
+    expect(extracted[0].rawMatch).toBe("2022-08-10");
+  });
+
+  it("extracts ISO timestamps with time component", () => {
+    const note = "Logged at 2024-03-01T14:30:00Z for review.";
+    const extracted = extractDatesFromText(note);
+    expect(extracted).toHaveLength(1);
+    expect(extracted[0].isoString).toBe("2024-03-01");
+    expect(extracted[0].confidence).toBe(1.0);
+  });
+
+  it("returns empty array for empty string", () => {
+    expect(extractDatesFromText("")).toHaveLength(0);
+  });
+
+  it("extracts dates with ordinal suffix (10th August 2024)", () => {
+    const note = "Review scheduled for 10th August 2024.";
+    const extracted = extractDatesFromText(note);
+    expect(extracted).toHaveLength(1);
+    expect(extracted[0].isoString).toBe("2024-08-10");
+    expect(extracted[0].confidence).toBe(1.0);
+  });
+
+  it("extracts dates with trailing comma (August 10, 2024)", () => {
+    const note = "Reviewed August 10, 2024 for compliance.";
+    const extracted = extractDatesFromText(note);
+    expect(extracted).toHaveLength(1);
+    expect(extracted[0].isoString).toBe("2024-08-10");
+    expect(extracted[0].confidence).toBe(1.0);
+  });
+
+  it("extracts ISO timestamp with timezone offset", () => {
+    const note = "Record updated 2024-07-15T09:00:00+05:30.";
+    const extracted = extractDatesFromText(note);
+    expect(extracted).toHaveLength(1);
+    expect(extracted[0].isoString).toBe("2024-07-15");
+    expect(extracted[0].confidence).toBe(1.0);
+  });
 });
 
 // ---------------------------------------------------------------------------
